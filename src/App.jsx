@@ -1,28 +1,33 @@
 import React, { useState, useEffect } from "react";
-import "./App.css";
+import { StyleSheet, View, Text, Button, TextInput, Dimensions } from "react-native";
+import { collection, addDoc, getDocs } from "firebase/firestore";
+import db from "./firebaseConfig";
+
+const { width, height } = Dimensions.get("window");
 
 export default function App() {
   const [name, setName] = useState("");
   const [gameStarted, setGameStarted] = useState(false);
-  const [ballPosition, setBallPosition] = useState({ x: 50, y: 80 });
+  const [ballPosition, setBallPosition] = useState({ x: width / 2, y: height - 100 });
   const [ballDirection, setBallDirection] = useState({ dx: 3, dy: -3 });
-  const [paddlePosition, setPaddlePosition] = useState(45);
+  const [paddlePosition, setPaddlePosition] = useState(width / 2 - 50);
   const [bricks, setBricks] = useState([]);
   const [gameOver, setGameOver] = useState(false);
   const [score, setScore] = useState(0);
+  const [scores, setScores] = useState([]);
 
   // Initialize bricks
   useEffect(() => {
     const rows = 5;
     const columns = 7;
-    const brickWidth = 12;
-    const brickHeight = 4;
+    const brickWidth = width / columns - 10;
+    const brickHeight = 20;
     const newBricks = [];
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < columns; col++) {
         newBricks.push({
-          x: col * (brickWidth + 1),
-          y: row * (brickHeight + 1) + 5,
+          x: col * (brickWidth + 10),
+          y: row * (brickHeight + 10) + 50,
           width: brickWidth,
           height: brickHeight,
           status: 1,
@@ -42,7 +47,7 @@ export default function App() {
         const newY = prev.y + ballDirection.dy;
 
         // Check collisions with walls
-        if (newX <= 0 || newX >= 100 - 2) {
+        if (newX <= 0 || newX >= width - 20) {
           setBallDirection((prevDir) => ({ ...prevDir, dx: -prevDir.dx }));
         }
         if (newY <= 0) {
@@ -50,14 +55,19 @@ export default function App() {
         }
 
         // Check collision with paddle
-        if (newY >= 90 && newX >= paddlePosition && newX <= paddlePosition + 10) {
+        if (
+          newY >= height - 120 &&
+          newX >= paddlePosition &&
+          newX <= paddlePosition + 100
+        ) {
           setBallDirection((prevDir) => ({ ...prevDir, dy: -prevDir.dy }));
         }
 
         // Check if ball falls below paddle (game over)
-        if (newY >= 100) {
+        if (newY >= height) {
           setGameOver(true);
           clearInterval(interval);
+          saveScore();
         }
 
         // Check collision with bricks
@@ -88,86 +98,194 @@ export default function App() {
   // Move paddle
   const movePaddle = (direction) => {
     setPaddlePosition((prev) =>
-      direction === "left" ? Math.max(0, prev - 5) : Math.min(90, prev + 5)
+      direction === "left"
+        ? Math.max(0, prev - 30)
+        : Math.min(width - 100, prev + 30)
     );
   };
 
+  // Save score to Firestore
+  const saveScore = async () => {
+    if (!name.trim()) return;
+
+    try {
+      await addDoc(collection(db, "scores"), {
+        name,
+        score,
+        date: new Date(),
+      });
+      fetchScores();
+    } catch (error) {
+      console.error("Error saving score: ", error);
+    }
+  };
+
+  // Fetch scores from Firestore
+  const fetchScores = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, "scores"));
+      const fetchedScores = querySnapshot.docs.map((doc) => doc.data());
+      setScores(fetchedScores);
+    } catch (error) {
+      console.error("Error fetching scores: ", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchScores();
+  }, []);
+
   return (
-    <div className="game-container">
+    <View style={styles.container}>
       {!gameStarted ? (
-        <div className="start-screen">
-          <h1>Breakout Game</h1>
-          <input
-            type="text"
+        <View style={styles.startScreen}>
+          <Text style={styles.title}>Breakout Game</Text>
+          <TextInput
+            style={styles.input}
             placeholder="Enter your name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChangeText={(text) => setName(text)}
           />
-          <button
-            onClick={() => {
+          <Button
+            title="Start Game"
+            onPress={() => {
               if (name.trim()) {
                 setGameStarted(true);
               } else {
                 alert("Please enter your name.");
               }
             }}
-          >
-            Start Game
-          </button>
-        </div>
+          />
+          <Text style={styles.subtitle}>Leaderboard:</Text>
+          {scores.map((player, index) => (
+            <Text key={index} style={styles.scoreText}>
+              {player.name}: {player.score}
+            </Text>
+          ))}
+        </View>
       ) : (
         <>
           {gameOver && (
-            <div className="overlay">
-              <h2>Game Over, {name}!</h2>
-              <p>Your Score: {score}</p>
-              <button
-                onClick={() => {
-                  setBallPosition({ x: 50, y: 80 });
+            <View style={styles.overlay}>
+              <Text style={styles.gameOverText}>Game Over, {name}!</Text>
+              <Text style={styles.scoreText}>Your Score: {score}</Text>
+              <Button
+                title="Restart"
+                onPress={() => {
+                  setBallPosition({ x: width / 2, y: height - 100 });
                   setBallDirection({ dx: 3, dy: -3 });
-                  setPaddlePosition(45);
+                  setPaddlePosition(width / 2 - 50);
                   setGameOver(false);
                   setGameStarted(false);
                   setScore(0); // Reset score
                 }}
-              >
-                Restart
-              </button>
-            </div>
+              />
+            </View>
           )}
-          <div
-            className="ball"
-            style={{
-              top: `${ballPosition.y}%`,
-              left: `${ballPosition.x}%`,
-            }}
-          ></div>
-          <div
-            className="paddle"
-            style={{ left: `${paddlePosition}%` }}
-          ></div>
+          <View style={[styles.ball, { top: ballPosition.y, left: ballPosition.x }]} />
+          <View style={[styles.paddle, { left: paddlePosition }]} />
           {bricks.map(
             (brick, index) =>
               brick.status === 1 && (
-                <div
+                <View
                   key={index}
-                  className="brick"
-                  style={{
-                    top: `${brick.y}%`,
-                    left: `${brick.x}%`,
-                    width: `${brick.width}%`,
-                    height: `${brick.height}%`,
-                  }}
-                ></div>
+                  style={[
+                    styles.brick,
+                    {
+                      top: brick.y,
+                      left: brick.x,
+                      width: brick.width,
+                      height: brick.height,
+                    },
+                  ]}
+                />
               )
           )}
-          <div className="controls">
-            <button onClick={() => movePaddle("left")}>Left</button>
-            <button onClick={() => movePaddle("right")}>Right</button>
-          </div>
-          <div className="score">Score: {score}</div>
+          <View style={styles.controls}>
+            <Button title="Left" onPress={() => movePaddle("left")} />
+            <Button title="Right" onPress={() => movePaddle("right")} />
+          </View>
+          <Text style={styles.score}>Score: {score}</Text>
         </>
       )}
-    </div>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  startScreen: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#000",
+  },
+  title: {
+    fontSize: 30,
+    color: "#FFF",
+    marginBottom: 20,
+  },
+  input: {
+    height: 40,
+    width: "80%",
+    backgroundColor: "#FFF",
+    borderRadius: 5,
+    paddingHorizontal: 10,
+    marginBottom: 20,
+  },
+  ball: {
+    position: "absolute",
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#FF5722",
+  },
+  paddle: {
+    position: "absolute",
+    bottom: 20,
+    width: 100,
+    height: 20,
+    backgroundColor: "#4CAF50",
+    borderRadius: 5,
+  },
+  brick: {
+    position: "absolute",
+    backgroundColor: "#FFC107",
+  },
+  controls: {
+    position: "absolute",
+    bottom: 50,
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-around",
+  },
+  overlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+  },
+  gameOverText: {
+    fontSize: 30,
+    color: "#FFF",
+    marginBottom: 20,
+  },
+  scoreText: {
+    fontSize: 20,
+    color: "#FFF",
+  },
+  score: {
+    position: "absolute",
+    top: 40,
+    left: 20,
+    fontSize: 20,
+    color: "#FFF",
+  },
+});
